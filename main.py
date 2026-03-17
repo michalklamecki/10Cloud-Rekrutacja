@@ -1,8 +1,8 @@
 """
 FinServe PoC - Problem 1: Manual Data Entry for Credit Applications
 
-This script reads a credit application PDF, extracts text, and uses a local
-Ollama model to produce a structured JSON payload.
+This script reads a credit application PDF, extracts text page-by-page, and
+uses a local Ollama model to produce structured JSON payloads per page/client.
 
 How to run:
 1) Install dependencies:
@@ -49,14 +49,16 @@ TARGET_SCHEMA: dict[str, str] = {
 }
 
 
-def extract_text_from_pdf(pdf_path: str) -> str:
-    """Extract full text from a PDF using pdfplumber.
+def extract_pages_from_pdf(pdf_path: str) -> list[dict[str, Any]]:
+    """Extract text from each PDF page using pdfplumber.
 
     Args:
         pdf_path: Absolute or relative path to a PDF file.
 
     Returns:
-        Concatenated text from all pages.
+        A list of dictionaries, each with:
+        - page_number: int
+        - text: str
 
     Raises:
         FileNotFoundError: If file does not exist.
@@ -68,20 +70,19 @@ def extract_text_from_pdf(pdf_path: str) -> str:
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
 
     try:
-        page_texts: list[str] = []
+        page_entries: list[dict[str, Any]] = []
         with pdfplumber.open(path) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text() or ""
-                if text.strip():
-                    page_texts.append(text)
+            for idx, page in enumerate(pdf.pages, start=1):
+                text = (page.extract_text() or "").strip()
+                if text:
+                    page_entries.append({"page_number": idx, "text": text})
     except Exception as exc:
         raise RuntimeError(f"Failed to read PDF '{pdf_path}': {exc}") from exc
 
-    full_text = "\n\n".join(page_texts).strip()
-    if not full_text:
+    if not page_entries:
         raise ValueError("No readable text found in the PDF.")
 
-    return full_text
+    return page_entries
 
 
 def extract_data_with_llm(text: str, model: str = MODEL_NAME) -> dict[str, Any]:
@@ -160,7 +161,7 @@ def extract_data_with_llm(text: str, model: str = MODEL_NAME) -> dict[str, Any]:
 
 
 def main() -> None:
-    """Orchestrate PDF reading, LLM extraction, and JSON output."""
+    """Orchestrate per-page PDF reading, LLM extraction, and JSON output."""
     parser = argparse.ArgumentParser(
         description="FinServe PoC: Extract credit application data from PDF using Ollama."
     )
@@ -178,10 +179,21 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        extracted_text = extract_text_from_pdf(args.pdf)
-        extracted_data = extract_data_with_llm(extracted_text, model=args.model)
+        pages = extract_pages_from_pdf(args.pdf)
+        applications: list[dict[str, Any]] = []
 
-        print(json.dumps(extracted_data, ensure_ascii=False, indent=2))
+        for page in pages:
+            page_number = page["page_number"]
+            page_text = page["text"]
+            extracted_data = extract_data_with_llm(page_text, model=args.model)
+            applications.append({"page_number": page_number, **extracted_data})
+
+        result = {
+            "source_pdf": str(Path(args.pdf).name),
+            "total_pages_processed": len(applications),
+            "applications": applications,
+        }
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
