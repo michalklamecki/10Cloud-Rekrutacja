@@ -26,7 +26,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -106,7 +108,9 @@ def extract_data_with_llm(text: str, model: str = MODEL_NAME) -> dict[str, Any]:
         "You are an information extraction engine for financial documents. "
         "Return ONLY one valid JSON object, with no markdown, no code fences, "
         "no comments, and no extra keys. "
-        "If a field is unknown, use null. "
+        "If a field is unknown, missing, unclear, or ambiguous, use null. "
+        "Never return placeholders such as 'Brak', 'N/A', '-', 'unknown', or empty strings. "
+        "Use JSON null in those cases. "
         "Use this exact schema: "
         '{"first_name": string|null, "last_name": string|null, "company_name": string|null, '
         '"tax_id": string|null, "requested_loan_amount": number|null, "email": string|null, '
@@ -160,6 +164,102 @@ def extract_data_with_llm(text: str, model: str = MODEL_NAME) -> dict[str, Any]:
     return cleaned
 
 
+def normalize_extracted_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Normalize model output so placeholder values become JSON nulls."""
+    placeholder_values = {
+        "",
+        "-",
+        "n/a",
+        "na",
+        "none",
+        "null",
+        "brak",
+        "nie dotyczy",
+        "unknown",
+    }
+
+    normalized: dict[str, Any] = {}
+    for key in TARGET_SCHEMA:
+        value = data.get(key)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.lower() in placeholder_values:
+                normalized[key] = None
+            else:
+                normalized[key] = stripped
+        else:
+            normalized[key] = value
+
+    return normalized
+
+
+def init_db(db_path: str) -> None:
+    """Initialize SQLite database and create the applications table if needed."""
+    create_table_sql = """
+    CREATE TABLE IF NOT EXISTS applications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_pdf TEXT NOT NULL,
+        page_number INTEGER NOT NULL,
+        first_name TEXT,
+        last_name TEXT,
+        company_name TEXT,
+        tax_id TEXT,
+        requested_loan_amount REAL,
+        email TEXT,
+        phone_number TEXT,
+        created_at TEXT NOT NULL
+    );
+    """
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(create_table_sql)
+        conn.commit()
+
+
+def save_applications_to_db(
+    db_path: str,
+    source_pdf: str,
+    applications: list[dict[str, Any]],
+) -> int:
+    """Persist extracted applications to SQLite and return inserted row count."""
+    insert_sql = """
+    INSERT INTO applications (
+        source_pdf,
+        page_number,
+        first_name,
+        last_name,
+        company_name,
+        tax_id,
+        requested_loan_amount,
+        email,
+        phone_number,
+        created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    """
+
+    now_utc = datetime.now(timezone.utc).isoformat()
+    rows = [
+        (
+            source_pdf,
+            app.get("page_number"),
+            app.get("first_name"),
+            app.get("last_name"),
+            app.get("company_name"),
+            app.get("tax_id"),
+            app.get("requested_loan_amount"),
+            app.get("email"),
+            app.get("phone_number"),
+            now_utc,
+        )
+        for app in applications
+    ]
+
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(insert_sql, rows)
+        conn.commit()
+
+    return len(rows)
+
+
 def main() -> None:
     """Orchestrate per-page PDF reading, LLM extraction, and JSON output."""
     parser = argparse.ArgumentParser(
@@ -175,22 +275,34 @@ def main() -> None:
         default=MODEL_NAME,
         help="Ollama model name (default: env OLLAMA_MODEL or 'llama3').",
     )
+    parser.add_argument(
+        "--db",
+        default="finserve.db",
+        help="SQLite DB path used to store extracted records (default: finserve.db).",
+    )
 
     args = parser.parse_args()
 
     try:
         pages = extract_pages_from_pdf(args.pdf)
         applications: list[dict[str, Any]] = []
+        source_pdf_name = str(Path(args.pdf).name)
 
         for page in pages:
             page_number = page["page_number"]
             page_text = page["text"]
             extracted_data = extract_data_with_llm(page_text, model=args.model)
-            applications.append({"page_number": page_number, **extracted_data})
+            normalized_data = normalize_extracted_data(extracted_data)
+            applications.append({"page_number": page_number, **normalized_data})
+
+        init_db(args.db)
+        inserted_count = save_applications_to_db(args.db, source_pdf_name, applications)
 
         result = {
-            "source_pdf": str(Path(args.pdf).name),
+            "source_pdf": source_pdf_name,
             "total_pages_processed": len(applications),
+            "db_path": args.db,
+            "rows_inserted": inserted_count,
             "applications": applications,
         }
         print(json.dumps(result, ensure_ascii=False, indent=2))
