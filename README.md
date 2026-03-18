@@ -131,7 +131,3 @@ Skrypt powinien (i w PoC zwykle robi):
 - `main.py` — punkt wejścia skryptu
 - `requirements.txt` — zależności Pythona
 - `README.md` — ten plik (opis projektu i instrukcje)
-
-## Kontakt / Uwagi
-
-Jeśli chcesz, rozbuduję instrukcję o przykładowy prompt używany do przetwarzania tekstu przez LLM oraz pokażę przykładowe fragmenty JSON zwracane przez model.
