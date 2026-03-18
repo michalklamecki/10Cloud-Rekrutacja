@@ -77,7 +77,7 @@ Typical options (implementation-dependent):
 Example with options:
 
 ```bash
-python main.py --pdf "applications.pdf" --model "llama3.1:8b" --db "data/finserve.db"
+python main.py --pdf "Dane_syntetyczne_10Cloud.pdf" --model "llama3.1:8b" --db "data/finserve.db"
 ```
 
 Environment variables
