@@ -1,6 +1,6 @@
 # FinServe PoC — Credit Application Data Extraction
 
-[Automation diagram](./Automation%20diagram.png)
+![Automation diagram](./Automation%20diagram.png)
 
 This repository contains a small Proof of Concept (PoC) that automates extraction of data from credit application PDFs. The system extracts key fields from application PDFs, normalizes and validates them, and stores structured results in a local SQLite database.
 
