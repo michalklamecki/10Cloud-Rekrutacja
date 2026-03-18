@@ -1,29 +1,32 @@
-# FinServe PoC - Credit Application Data Extraction
+# FinServe PoC — Credit Application Data Extraction
 
-Ten projekt to Proof of Concept (PoC) automatyzujący ekstrakcję danych z formularzy kredytowych w formacie PDF. Skrypt wyciąga z dokumentów najważniejsze pola, normalizuje je, waliduje i zapisuje do lokalnej bazy SQLite.
+[Automation diagram](./Automation%20diagram.png)
 
-## Czego używa projekt
+This repository contains a small Proof of Concept (PoC) that automates extraction of data from credit application PDFs. The system extracts key fields from application PDFs, normalizes and validates them, and stores structured results in a local SQLite database.
 
-- `pdfplumber` — do ekstrakcji tekstu ze stron PDF
-- Lokalny serwer Ollama (np. Llama 3) — do parsowania nieustrukturyzowanego tekstu i konwersji na strukturę JSON
-- `sqlite3` — lekka baza danych do przechowywania wyników
+Overview
+--------
 
-## Co robi skrypt
+- Extract raw text from PDF pages using `pdfplumber`.
+- Re-structure raw text into JSON using a local LLM (Ollama).
+- Save validated and normalized records to a local SQLite database (`finserve.db`).
 
-1. Otwiera podany PDF i przetwarza go stronami.
-2. Dla każdej strony wyciąga surowy tekst za pomocą `pdfplumber`.
-3. Wysyła tekst do lokalnego modelu LLM (Ollama), który według zdefiniowanego promptu zwraca JSON z polami:
-   - `first_name`, `last_name`, `company_name`, `tax_id`, `requested_loan_amount`, `email`, `phone_number`.
-4. Skrypt wykonuje podstawową walidację i normalizację pól (np. usuwanie spacji, formatowanie numerów, parsowanie kwot).
-5. Wynik zapisywany jest w tabeli `applications` w lokalnej bazie `finserve.db` razem z nazwą pliku źródłowego i numerem strony.
+How it works
+------------
 
-## Schemat bazy danych
+1. The script opens the provided PDF and processes it page by page.
+2. For each page it extracts raw text using `pdfplumber`.
+3. The extracted text is sent to a local LLM (via Ollama). The model is instructed (via a prompt) to return a compact JSON object containing fields such as `first_name`, `last_name`, `company_name`, `tax_id`, `requested_loan_amount`, `email`, and `phone_number`.
+4. The script performs light validation and normalization (trim whitespace, parse amounts to numbers, simple email/phone regex checks, sanitize tax IDs).
+5. The normalized record is inserted into the `applications` table together with source PDF name, page number and UTC timestamp.
 
-Tabela `applications`:
+## Database schema
+
+Table `applications`:
 
 - `id` INTEGER PRIMARY KEY
-- `source_pdf` TEXT — nazwa pliku źródłowego
-- `page_number` INTEGER — numer strony w PDF
+- `source_pdf` TEXT — source PDF filename
+- `page_number` INTEGER — page number within PDF
 - `first_name` TEXT
 - `last_name` TEXT
 - `company_name` TEXT
@@ -31,103 +34,93 @@ Tabela `applications`:
 - `requested_loan_amount` REAL
 - `email` TEXT
 - `phone_number` TEXT
-- `created_at` TEXT — znaczek czasu w UTC
+- `created_at` TEXT — UTC timestamp
 
-## Wymagania
+Prerequisites
+-------------
 
 - Python 3.8+
-- Ollama (lokalny serwer/model)
-- Zainstalowane zależności z `requirements.txt` (np. `pdfplumber`, `requests` lub inny klient HTTP do Ollama, `python-dotenv` jeśli używasz .env)
+- Ollama (local server/model)
+- Dependencies installed from `requirements.txt` (for example `pdfplumber`, an HTTP client for Ollama, etc.)
 
-## Instalacja
+Installation
+------------
 
-1. Utwórz i aktywuj wirtualne środowisko (zalecane):
-
-```bash
-python -m venv .venv
-# Windows PowerShell
-.\.venv\Scripts\Activate.ps1
-# Windows cmd
-.\.venv\Scripts\activate.bat
-```
-
-2. Zainstaluj zależności:
+1. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Uruchom Ollama (jeśli jeszcze nie działa):
-
-- Uruchom serwer Ollama (desktop app lub CLI). Aby uruchomić serwer przez CLI:
+2. Ensure Ollama is running and the desired model is available:
 
 ```bash
 ollama serve
-```
-
-- Upewnij się, że masz pobrany model, np.:
-
-```bash
 ollama pull llama3.1:8b
 ```
 
-## Uruchomienie skryptu
+Running the script
+------------------
 
-Podstawowa komenda uruchamiająca (z katalogu projektu):
+Basic usage (from project directory):
 
 ```bash
-python main.py --pdf "ścieżka/do/formularza.pdf"
+python main.py --pdf "path/to/application.pdf"
 ```
 
-Dostępne opcje (przykładowe, zależne od implementacji w `main.py`):
+Typical options (implementation-dependent):
 
-- `--pdf` — ścieżka do pliku PDF (wymagane)
-- `--model` — nazwa modelu Ollama (domyślnie `llama3.1:8b` lub wartość z `OLLAMA_MODEL`)
-- `--db` — ścieżka do pliku SQLite (domyślnie `finserve.db`)
+- `--pdf` — path to the PDF file (required)
+- `--model` — Ollama model name (default: `llama3.1:8b` or value from `OLLAMA_MODEL` env)
+- `--db` — path to SQLite DB file (default: `finserve.db`)
 
-Przykład z dodatkowymi opcjami:
+Example with options:
 
 ```bash
-# użycie niestandardowego modelu i bazy
 python main.py --pdf "applications.pdf" --model "llama3.1:8b" --db "data/finserve.db"
 ```
 
-## Zmienne środowiskowe
+Environment variables
+---------------------
 
-- `OLLAMA_MODEL` — jeśli ustawione, skrypt użyje tej nazwy modelu jako domyślnej.
+- `OLLAMA_MODEL` — optional, sets default Ollama model.
 
-Przykład (Windows PowerShell):
+Example (PowerShell):
 
 ```powershell
 $env:OLLAMA_MODEL = "llama3.1:8b"
 ```
 
-## Walidacja danych i normalizacja
+Data validation and normalization
+---------------------------------
 
-Skrypt powinien (i w PoC zwykle robi):
+The script typically performs these steps:
 
-- Usunąć nadmiarowe białe znaki
-- Rozpoznać i usunąć znaki formatowania w `tax_id`
-- Parsować kwoty do formatu liczbowego (float)
-- Prosty regex dla `email` i `phone_number` aby wykryć oczywiste błędy
+- Trim extra whitespace
+- Remove formatting characters from `tax_id`
+- Parse requested amounts into numeric (`float`) values
+- Basic regex checks for `email` and `phone_number`
 
-(Jeśli chcesz, mogę dodać rozszerzoną walidację, np. biblioteki do walidacji numerów telefonu lub CPF/NIP zależnie od kraju.)
+Troubleshooting
+---------------
 
-## Obsługa błędów i troubleshooting
+- Ollama connection error: check that `ollama serve` is running and the model is available (`ollama list`).
 
-- Jeśli otrzymujesz błąd połączenia z Ollama: sprawdź, czy `ollama serve` działa i czy model jest pobrany (`ollama list`).
-- Jeśli model zwraca nieprawidłowy JSON: sprawdź prompt wysyłany do modelu i ewentualnie zwiększ nadzór (więcej przykładów w promptcie) albo wymuś schemat JSON w promptcie.
-- Jeśli PDF jest zaszyfrowany/chroniony: odszyfruj go lub sprawdź prawa dostępu.
+Potential improvements
+----------------------
 
-## Dalsze kroki (opcjonalne usprawnienia)
+- Ingest PDFs directly from email via webhook (automatic pickup of attachments and processing).
+- Add a human-in-the-loop system to review and confirm extracted data before final persistence.
+- Add comprehensive logging (structured logs, rotation, and error tracking).
 
-- Logging operacji do pliku/logu (np. `logging` z rotacją)
-- Mapowanie pól z różnymi wariantami formularzy (regelarne wyrażenia przed wywołaniem LLM)
-- Testy jednostkowe dla funkcji parsujących i walidujących
-- Konteneryzacja (Docker) z zainstalowanym Ollama klienckim lub specyficznymi konfiguracjami
+ERP integration and business value
+---------------------------------
 
-## Pliki w repozytorium
+This pipeline can be integrated with an ERP system to automatically feed customer and application data into back-office workflows. By eliminating manual data entry, such integration can save significant amounts of time for staff who currently enter these records by hand and reduce human errors in downstream processes.
 
-- `main.py` — punkt wejścia skryptu
-- `requirements.txt` — zależności Pythona
-- `README.md` — ten plik (opis projektu i instrukcje)
+Repository files
+----------------
+
+- `main.py` — script entrypoint
+- `requirements.txt` — Python dependencies
+- `README.md` — this file (project description and instructions)
