@@ -11,7 +11,7 @@ How to run:
 2) Ensure Ollama is installed and running locally.
 
 3) Pull/start a model (example):
-   ollama run llama3
+   ollama run llama3.1:8b
 
 4) Run the script with a PDF path:
    python main.py --pdf "/path/to/credit_application.pdf"
